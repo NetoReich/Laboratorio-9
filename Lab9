@@ -1,0 +1,142 @@
+// Johann Haeussler 21223
+// PIC16F887
+// Laboratorio 9
+
+// CONFIG1
+#pragma config FOSC = INTRC_NOCLKOUT// Oscillator Selection bits (INTOSCIO oscillator: I/O function on RA6/OSC2/CLKOUT pin, I/O function on RA7/OSC1/CLKIN)
+#pragma config WDTE = OFF       // Watchdog Timer Enable bit (WDT disabled and can be enabled by SWDTEN bit of the WDTCON register)
+#pragma config PWRTE = OFF      // Power-up Timer Enable bit (PWRT disabled)
+#pragma config MCLRE = OFF      // RE3/MCLR pin function select bit (RE3/MCLR pin function is digital input, MCLR internally tied to VDD)
+#pragma config CP = OFF         // Code Protection bit (Program memory code protection is disabled)
+#pragma config CPD = OFF        // Data Code Protection bit (Data memory code protection is disabled)
+#pragma config BOREN = OFF      // Brown Out Reset Selection bits (BOR disabled)
+#pragma config IESO = OFF       // Internal External Switchover bit (Internal/External Switchover mode is disabled)
+#pragma config FCMEN = OFF      // Fail-Safe Clock Monitor Enabled bit (Fail-Safe Clock Monitor is disabled)
+#pragma config LVP = OFF        // Low Voltage Programming Enable bit (RB3 pin has digital I/O, HV on MCLR must be used for programming)
+// CONFIG2
+#pragma config BOR4V = BOR40V   // Brown-out Reset Selection bit (Brown-out Reset set to 4.0V)
+#pragma config WRT = OFF        // Flash Program Memory Self Write Enable bits (Write protection off)
+
+#include <xc.h>
+#include <stdint.h>
+
+//definicion de frecuencia para delay
+#define _XTAL_FREQ 4000000          // Aquí se define la frecuencia del oscilador del microcontrolador que se utiliza para el retraso en el código.
+int APAGADO = 0;                    // Se declara una variable llamada "APAGADO" que se utiliza para controlar el estado del microcontrolador.
+
+//PROTOTIPO DE FUNCIONES
+void setup(void); // 
+uint8_t read_EEPROM(uint8_t ADRESS);
+void write_EEPROM(uint8_t ADRESS, uint8_t data);    // Se declaran los prototipos de tres funciones que se definirán más adelante: "setup", "read_EEPROM" y "write_EEPROM".
+
+//INTERRUPCIONES
+void __interrupt() isr(void){           // Se define una función de interrupción que se ejecuta cuando se produce una interrupción. El "__interrupt" y "isr" son palabras clave para el compilador que indican que se trata de una función de interrupción.
+    if(INTCONbits.RBIF){                // Aquí se comprueba si se ha producido una interrupción en el puerto B.
+        if (!PORTBbits.RB0){            // Si el pin RB0 del puerto B está en 0,
+            APAGADO = 1;                // Se apaga el microcontrolador poniendo la variable "APAGADO" en 1
+            PORTEbits.RE0 = 1;          // Enciende el pin RE0 del puerto E y entra en modo de suspensión con la función "SLEEP".
+            SLEEP();
+        }
+        else if (PORTBbits.RB1 == 0 && APAGADO == 1){   // Si el pin RB1 del puerto B está en 0 y la variable "APAGADO" es 1
+            APAGADO = 0;                                //  Se enciende el microcontrolador poniendo la variable "APAGADO" en 0
+            PORTEbits.RE0 = 0;                          // Apaga el pin RE0 del puerto E y lee el valor almacenado en la dirección de memoria 0 de la EEPROM
+            PORTD = read_EEPROM(0);                     // Y lo pone en el puerto D.
+        }
+        else if(!PORTBbits.RB2){                        // Si el pin RB2 del puerto B está en 0
+            write_EEPROM(0, ADRESH);                    // Se llama a la función "write_EEPROM" con la dirección de memoria 0 y el valor del registro "ADRESH" como argumentos.
+        }
+        INTCONbits.RBIF = 0;                            // Se restablece la bandera de interrupción en el puerto B.
+    }
+    if(PIR1bits.ADIF){                                  // Se comprueba si se ha producido una interrupción del módulo de conversión analógica a digital (ADC).
+        
+        if(ADCON0bits.CHS == 0){                        // Si el canal de ADC seleccionado es 0, el valor convertido se almacena en el puerto C.
+            PORTC = ADRESH;                             // Se restablece la bandera de interrupción del ADC.
+        }
+        PIR1bits.ADIF = 0;                              // Se restablece la bandera de interrupción del ADC.
+    }
+    return;                                             // retorno
+} 
+
+void main(void){                        // Comienza la definición de la función main.
+    setup();                            // Llama a la función setup().
+    while(1){                           // Loop
+        if(!APAGADO){                   // Si la variable APAGADO es falsa (0), entonces continúa.
+            if(ADCON0bits.GO == 0){     // Si el bit GO de ADCON0 es 0, entonces continúa.
+                ADCON0bits.GO = 1;      // Establece el bit GO de ADCON0 a 1 para iniciar una conversión 
+            }
+        }
+    }
+    return;                             // Finaliza la ejecución de la función main.
+}
+
+void setup(void){                       // Comienza la definición de la función setup.
+    ANSEL = 0b00000001;                 // Configura el pin AN0 como entrada analógica.
+    ANSELH = 0;                         // Configura todos los pines del puerto B como pines digitales.
+    
+    TRISA = 0b00000001;                 // Configura el pin RA0 como entrada.
+    PORTA = 0x00;                       // Limpia el puerto A.
+    
+    TRISBbits.TRISB0 = 1;       // Configura el pin RB0 como entrada.
+    TRISBbits.TRISB1 = 1;       // Configura el pin RB1 como entrada.
+    
+    TRISC = 0b00000000;         // Configura todos los pines del puerto C como pines de salida.
+    PORTC = 0x00;               // Limpia el puerto C.
+    TRISD = 0b00000000;         // Configura todos los pines del puerto D como pines de salida.
+    PORTD = 0x00;               // Limpia el puerto D.
+    TRISE = 0b00000000;         // Configura todos los pines del puerto E como pines de salida.
+    PORTE = 0x00;               // Limpia el puerto E.
+    
+    OPTION_REGbits.nRBPU = 0;   // Habilita las resistencias pull-up internas.
+    WPUBbits.WPUB0 = 1;         // Habilita la resistencia pull-up interna del pin RB0.
+    WPUBbits.WPUB1 = 1;         // Habilita la resistencia pull-up interna del pin RB1.
+    WPUBbits.WPUB2 = 1;         // Habilita la resistencia pull-up interna del pin RB2.
+    
+    //CONFIGURACION DE OSCILADOS
+    OSCCONbits.IRCF = 0b0110;   // Configura la frecuencia del oscilador interno a 4 MHz.
+    OSCCONbits.SCS = 1;         // Selecciona el oscilador interno como fuente de reloj.
+    
+    //CONFIGURACION DE INTERRUPCIONES
+    PIR1bits.ADIF = 0;          // Limpia la bandera de interrupción del ADC.
+    PIE1bits.ADIE = 1;          // Habilita la interrupción del ADC.
+    INTCONbits.PEIE = 1;        // Habilita las interrupciones de periféricos.
+    INTCONbits.GIE = 1;         // Habilita las interrupciones globales.
+    INTCONbits.RBIE = 1;        // Habilita las interrupciones por cambio de estado en el puerto B.
+    IOCBbits.IOCB0 = 1;         // Habilita las interrupciones por cambio de estado en el pin RB0.
+    IOCBbits.IOCB1 = 1;         // Habilita las interrupciones por cambio de estado en el pin RB1.
+    IOCBbits.IOCB2 = 1;         // Habilita las interrupciones por cambio de estado en el pin RB2.
+    
+    //CONFIGURACION ADC
+    ADCON0bits.ADCS = 0b11;     // Establece el reloj del ADC en Fosc/8.
+    ADCON1bits.VCFG0 = 0;       // Establece el voltaje de referencia negativo en Vss.
+    ADCON1bits.VCFG1 = 0;       // Establece el voltaje de referencia positivo en Vdd.
+    ADCON0bits.CHS = 0b0000;    // Selecciona el canal 0 como entrada analógica.
+    ADCON1bits.ADFM = 0;        // Justifica los resultados a la izquierda.
+    ADCON0bits.ADON = 1;        // Habilita el módulo ADC.
+    __delay_us(40);             // Espera durante 40 microsegundos.
+    
+    return; 
+} 
+
+uint8_t read_EEPROM(uint8_t ADRESS){    // Declara la función de lectura de la EEPROM y toma como entrada la dirección que se quiere leer.
+    EEADR = ADRESS;                     // Establece la dirección de la EEPROM a leer.
+    EECON1bits.EEPGD = 0;               // Establece el modo de acceso a la memoria EEPROM.
+    EECON1bits.RD = 1;                  // Inicia la lectura de la EEPROM.
+    return EEDAT;                       // Devuelve
+}
+
+void write_EEPROM(uint8_t ADRESS, uint8_t data){ 
+    EEADR = ADRESS;                     // Se carga la dirección de memoria EEPROM a escribir con el valor pasado por parámetro en ADRESS.
+    EEDAT = data;                       // Se carga el dato a escribir en la memoria EEPROM con el valor pasado por parámetro en data.
+    EECON1bits.EEPGD = 0;               // Se selecciona la memoria EEPROM para la operación de escritura.
+    EECON1bits.WREN = 1;                // Se habilita la escritura en la memoria EEPROM.
+    
+    INTCONbits.GIE = 0;                 // Se deshabilitan las interrupciones globales.
+    EECON2 = 0x55;                      // Se cargan dos valores especiales (0x55 y 0xAA) para poder habilitar la escritura en la memoria EEPROM.
+    EECON2 = 0xAA;                      // Segunda carga de valor especial para habilitar la escritura en la memoria EEPROM.
+    
+    
+    EECON1bits.WR = 1;                  // Se inicia la operación de escritura en la memoria EEPROM.
+    EECON1bits.WREN = 0;                // Se deshabilita la escritura en la memoria EEPROM para evitar escrituras accidentales.
+    INTCONbits.RBIF = 0;                // Se limpia el flag de interrupción de cambio en el puerto B.
+    INTCONbits.GIE = 1;                 // Se habilitan las interrupciones globales nuevamente.
+}
